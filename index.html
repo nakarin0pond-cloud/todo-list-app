@@ -1,35 +1,62 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="th">
 <head>
-
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>Animated To-Do List App</title>
-
-<link rel="stylesheet" href="style.css">
-
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Advanced To-Do App — Portfolio</title>
+<link rel="stylesheet" href="style.css" />
 </head>
-
 <body>
-
-<div class="container">
-
-<h1 class="title">✨ My Task Manager</h1>
-
-<div class="input-area">
-
-<input id="taskInput" type="text" placeholder="Add new task...">
-
-<button onclick="addTask()">Add</button>
-
+<main class="app" aria-labelledby="appTitle">
+<header>
+<h1 id="appTitle">⚡ Advanced Task Manager</h1>
+<div class="header-actions">
+<button id="themeToggle" aria-pressed="false" title="Toggle theme">🌙</button>
+<button id="addSample" title="Add sample tasks">➕ Sample</button>
 </div>
-
-<ul id="taskList"></ul>
-
+</header><section class="input-area" aria-label="Add task">
+<input id="taskInput" placeholder="Add a new task..." aria-label="Task description" />
+<input id="dueInput" type="date" aria-label="Due date" />
+<select id="prioritySelect" aria-label="Priority">
+<option value="normal">Normal</option>
+<option value="high">High 🔥</option>
+<option value="low">Low</option>
+</select>
+<button id="addBtn">Add</button>
+</section><div class="progress" aria-hidden="false" title="Completion progress">
+<div id="progressBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+</div><nav class="filters" role="tablist" aria-label="Filters">
+<button data-filter="all" role="tab" aria-selected="true">All</button>
+<button data-filter="active" role="tab">Active</button>
+<button data-filter="completed" role="tab">Completed</button>
+</nav><ul id="taskList" class="task-list" aria-live="polite"></ul><div class="bottom">
+<div class="left">
+<span id="taskCount"></span>
 </div>
-
-<script src="script.js"></script>
-
+<div class="right">
+<button id="clearCompleted">Clear Completed</button>
+<button id="exportBtn" title="Export tasks">⬇️ Export</button>
+<button id="importBtn" title="Import tasks">⬆️ Import</button>
+<input type="file" id="importFile" accept="application/json" style="display:none" />
+</div>
+</div><template id="taskTemplate">
+<li class="task" draggable="true">
+<div class="task-main">
+<button class="check" aria-label="Toggle complete">✓</button>
+<div class="meta">
+<span class="text"></span>
+<div class="sub">
+<span class="due"></span>
+<span class="priority"></span>
+</div>
+</div>
+</div>
+<div class="task-actions">
+<button class="edit" title="Edit task">✎</button>
+<button class="delete" title="Delete task">✕</button>
+</div>
+</li>
+</template><script src="script.js"></script>
+</main>
 </body>
 </html>
