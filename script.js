@@ -1,622 +1,747 @@
 /**
- * PlanFlow — Calendar Planner
- * Views: Month, Week, Day
- * Features: Range events, time-based slots, animations, localStorage persist
+ * PlanFlow — script.js
+ *
+ * Key algorithm: renderMonth() computes event spans per-row so that
+ * multi-day events display as continuous bars across week rows,
+ * exactly like Google Calendar.
+ *
+ * Views: Month (span bars) | Week (time grid) | Day (time grid)
+ * Persist: localStorage
+ * Category: preset + custom text
  */
 
-// ── State ─────────────────────────────────────────────────────────────────────
-let events = JSON.parse(localStorage.getItem('planflow_events')) || [];
-let today  = new Date();
-let cursor = new Date(today.getFullYear(), today.getMonth(), 1); // month cursor
-let view   = 'month'; // month | week | day
-let dayViewDate = new Date(today);
-let editingEventId = null;
+'use strict';
 
-// ── DOM ───────────────────────────────────────────────────────────────────────
-const calHeader     = document.getElementById('calHeader');
-const calGrid       = document.getElementById('calGrid');
-const mainTitle     = document.getElementById('mainTitle');
-const miniTitle     = document.getElementById('miniTitle');
-const prevMonthBtn  = document.getElementById('prevMonth');
-const nextMonthBtn  = document.getElementById('nextMonth');
-const mainPrev      = document.getElementById('mainPrev');
-const mainNext      = document.getElementById('mainNext');
-const todayBtn      = document.getElementById('todayBtn');
-const addEventBtn   = document.getElementById('addEventBtn');
-const sidebarToggle = document.getElementById('sidebarToggle');
-const sidebar       = document.getElementById('sidebar');
-const upcomingList  = document.getElementById('upcomingList');
-const viewTabs      = document.querySelectorAll('.view-tab');
-const viewMonth     = document.getElementById('viewMonth');
-const viewWeek      = document.getElementById('viewWeek');
-const viewDay       = document.getElementById('viewDay');
-const detailModal   = document.getElementById('detailModal');
-const detailClose   = document.getElementById('detailClose');
-const dayModal      = document.getElementById('dayModal');
-const dayModalClose = document.getElementById('dayModalClose');
-const dayModalTitle = document.getElementById('dayModalTitle');
-const dayModalEvents= document.getElementById('dayModalEvents');
-const dayModalAdd   = document.getElementById('dayModalAdd');
-const deleteEventBtn= document.getElementById('deleteEventBtn');
+/* ── Constants ───────────────────────────────────────────────── */
+const DAY_NAMES   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MONTH_NAMES = ['January','February','March','April','May','June',
+                     'July','August','September','October','November','December'];
 
-// ── Utilities ─────────────────────────────────────────────────────────────────
-const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-const MONTHS = ['January','February','March','April','May','June',
-                'July','August','September','October','November','December'];
-const CAT_ICONS = { study:'📚', work:'💼', meet:'🤝', health:'💪', personal:'✨', deadline:'🔥' };
-const CAT_COLORS = { study:'var(--study)', work:'var(--work)', meet:'var(--meet)',
-                     health:'var(--health)', personal:'var(--personal)', deadline:'var(--deadline)' };
+const PRESET_CATS = {
+  study:    { label:'Study',    icon:'📚', color:'#4f87f5' },
+  work:     { label:'Work',     icon:'💼', color:'#a78bfa' },
+  meet:     { label:'Meeting',  icon:'🤝', color:'#2dd4a0' },
+  health:   { label:'Health',   icon:'💪', color:'#fb923c' },
+  personal: { label:'Personal', icon:'✨', color:'#f472b6' },
+  deadline: { label:'Deadline', icon:'🔥', color:'#f95959' },
+};
+const CUSTOM_COLOR = '#facc15';
 
-function save() { localStorage.setItem('planflow_events', JSON.stringify(events)); }
+/* ── State ───────────────────────────────────────────────────── */
+let events   = JSON.parse(localStorage.getItem('pf_events')) || [];
+let today    = new Date();
+let cursor   = new Date(today.getFullYear(), today.getMonth(), 1);
+let dayDate  = new Date(today);
+let view     = 'month';
+let selCat   = 'study';   // 'study'|'work'|...|'' (custom)
+let detailId = null;
+let dmDate   = null;
 
-function dateStr(d) {
-  return d.toISOString().split('T')[0];
+/* ── Helpers ─────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+
+/** Return YYYY-MM-DD for a Date object */
+function ds(d) {
+  return d.getFullYear() + '-' +
+    String(d.getMonth()+1).padStart(2,'0') + '-' +
+    String(d.getDate()).padStart(2,'0');
 }
 
-function parseDate(str) {
-  const [y,m,d] = str.split('-').map(Number);
+/** Parse YYYY-MM-DD to local Date (no UTC shift) */
+function pd(s) {
+  const [y,m,d] = s.split('-').map(Number);
   return new Date(y, m-1, d);
 }
 
-function formatDate(str) {
-  if (!str) return '';
-  const d = parseDate(str);
-  return `${d.getDate()} ${MONTHS[d.getMonth()].slice(0,3)} ${d.getFullYear()}`;
+function fmtDate(s) {
+  if (!s) return '';
+  const d = pd(s);
+  return `${d.getDate()} ${MONTH_NAMES[d.getMonth()].slice(0,3)} ${d.getFullYear()}`;
 }
 
-function formatTime(t) {
+function fmtTime(t) {
   if (!t) return '';
-  const [h,m] = t.split(':');
-  const hr = parseInt(h);
-  const ampm = hr >= 12 ? 'PM' : 'AM';
-  return `${hr === 0 ? 12 : hr > 12 ? hr-12 : hr}:${m} ${ampm}`;
+  const [h, m] = t.split(':').map(Number);
+  return `${h===0?12:h>12?h-12:h}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}`;
 }
 
-function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2,5); }
+function genId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+}
 
-// ── Background Canvas ─────────────────────────────────────────────────────────
+function todayStr() { return ds(today); }
+
+function catColor(ev) {
+  if (ev.category === '') return CUSTOM_COLOR;
+  return PRESET_CATS[ev.category]?.color || CUSTOM_COLOR;
+}
+function catIcon(ev) {
+  if (ev.category === '') return '🏷';
+  return PRESET_CATS[ev.category]?.icon || '🏷';
+}
+function catClass(ev) {
+  return ev.category === '' ? 'custom' : ev.category;
+}
+
+function save() {
+  localStorage.setItem('pf_events', JSON.stringify(events));
+}
+
+/* ── Background canvas ───────────────────────────────────────── */
 (function initCanvas() {
-  const canvas = document.getElementById('bgCanvas');
+  const canvas = $('bgCanvas');
+  if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  let w, h, particles;
+  let w, h, pts;
 
   function resize() {
     w = canvas.width  = window.innerWidth;
     h = canvas.height = window.innerHeight;
   }
-
-  function initParticles() {
-    particles = Array.from({length: 60}, () => ({
-      x: Math.random() * w,
-      y: Math.random() * h,
-      r: Math.random() * 1.5 + 0.3,
-      vx: (Math.random() - 0.5) * 0.2,
-      vy: (Math.random() - 0.5) * 0.2,
-      a: Math.random() * 0.4 + 0.1
+  function init() {
+    pts = Array.from({length:55}, () => ({
+      x: Math.random()*w, y: Math.random()*h,
+      r: Math.random()*1.4+.3,
+      vx:(Math.random()-.5)*.18, vy:(Math.random()-.5)*.18,
+      a: Math.random()*.35+.08
     }));
   }
-
   function draw() {
-    ctx.clearRect(0, 0, w, h);
-    particles.forEach(p => {
+    ctx.clearRect(0,0,w,h);
+    pts.forEach(p => {
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(79,142,247,${p.a})`;
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(99,102,241,${p.a})`;
       ctx.fill();
       p.x += p.vx; p.y += p.vy;
-      if (p.x < 0 || p.x > w) p.vx *= -1;
-      if (p.y < 0 || p.y > h) p.vy *= -1;
+      if (p.x<0||p.x>w) p.vx *= -1;
+      if (p.y<0||p.y>h) p.vy *= -1;
     });
     requestAnimationFrame(draw);
   }
-
-  resize(); initParticles(); draw();
-  window.addEventListener('resize', () => { resize(); initParticles(); });
+  resize(); init(); draw();
+  window.addEventListener('resize', () => { resize(); init(); });
 })();
 
-// ── Add Event ─────────────────────────────────────────────────────────────────
-addEventBtn.onclick = () => {
-  const title = document.getElementById('evTitle').value.trim();
-  if (!title) { shake(document.getElementById('evTitle')); return; }
-  const start = document.getElementById('evStart').value;
-  const end   = document.getElementById('evEnd').value || start;
-  if (!start) { shake(document.getElementById('evStart')); return; }
+/* ── Category pill selection ─────────────────────────────────── */
+const catPillsEl = $('catPills');
+catPillsEl.addEventListener('click', e => {
+  const pill = e.target.closest('.cat-pill');
+  if (!pill) return;
+  selCat = pill.dataset.cat;
+
+  // Update active styles
+  document.querySelectorAll('.cat-pill').forEach(p => p.classList.remove('active'));
+  pill.classList.add('active');
+
+  // Show/hide custom input
+  const wrap = $('customCatWrap');
+  if (selCat === '') {
+    wrap.classList.remove('hidden');
+    $('customCatInput').focus();
+  } else {
+    wrap.classList.add('hidden');
+  }
+});
+
+/* ── Add Event ───────────────────────────────────────────────── */
+$('addBtn').addEventListener('click', addEvent);
+$('fTitle').addEventListener('keydown', e => { if (e.key === 'Enter') addEvent(); });
+
+function addEvent() {
+  const title = $('fTitle').value.trim();
+  if (!title) { shake($('fTitle')); return; }
+
+  const start = $('fStart').value;
+  if (!start) { shake($('fStart')); return; }
+
+  let end = $('fEnd').value || start;
+  if (end < start) end = start;
+
+  // Custom category label
+  const customLabel = ($('customCatInput').value.trim()) || '🏷 Custom';
 
   const ev = {
-    id:        genId(),
+    id:          genId(),
     title,
-    category:  document.getElementById('evCategory').value,
-    start,
-    end:       end >= start ? end : start,
-    startTime: document.getElementById('evStartTime').value || '09:00',
-    endTime:   document.getElementById('evEndTime').value   || '10:00',
-    note:      document.getElementById('evNote').value.trim()
+    category:    selCat,          // '' means custom
+    customLabel: selCat === '' ? customLabel : '',
+    start, end,
+    startTime:   $('fSTime').value || '09:00',
+    endTime:     $('fETime').value || '10:00',
+    note:        $('fNote').value.trim(),
   };
 
   events.push(ev);
-  save(); render();
+  save();
+  render();
+  popAnim($('addBtn'));
 
-  // Clear form
-  document.getElementById('evTitle').value = '';
-  document.getElementById('evNote').value  = '';
-  document.getElementById('evStart').value = '';
-  document.getElementById('evEnd').value   = '';
-  document.getElementById('evCategory').value = 'study';
-};
+  // Reset
+  $('fTitle').value = '';
+  $('fNote').value  = '';
+  $('fStart').value = '';
+  $('fEnd').value   = '';
+  $('fSTime').value = '09:00';
+  $('fETime').value = '10:00';
+  $('fTitle').focus();
+}
 
-// ── Navigation ────────────────────────────────────────────────────────────────
-prevMonthBtn.onclick = mainPrev.onclick = () => {
-  if (view === 'month' || view === 'week') {
-    cursor = new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1);
-  } else {
-    dayViewDate.setDate(dayViewDate.getDate() - 1);
-  }
+/* ── Navigation ──────────────────────────────────────────────── */
+$('prevBtn').onclick = () => {
+  if (view === 'day') { dayDate.setDate(dayDate.getDate()-1); }
+  else cursor = new Date(cursor.getFullYear(), cursor.getMonth()-1, 1);
   render();
 };
-nextMonthBtn.onclick = mainNext.onclick = () => {
-  if (view === 'month' || view === 'week') {
-    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
-  } else {
-    dayViewDate.setDate(dayViewDate.getDate() + 1);
-  }
+$('nextBtn').onclick = () => {
+  if (view === 'day') { dayDate.setDate(dayDate.getDate()+1); }
+  else cursor = new Date(cursor.getFullYear(), cursor.getMonth()+1, 1);
   render();
 };
-todayBtn.onclick = () => {
-  today = new Date();
-  cursor = new Date(today.getFullYear(), today.getMonth(), 1);
-  dayViewDate = new Date(today);
+$('todayBtn').onclick = () => {
+  today   = new Date();
+  cursor  = new Date(today.getFullYear(), today.getMonth(), 1);
+  dayDate = new Date(today);
   render();
 };
 
-// ── Sidebar Toggle ─────────────────────────────────────────────────────────────
-sidebarToggle.onclick = () => sidebar.classList.toggle('collapsed');
+/* ── Sidebar ─────────────────────────────────────────────────── */
+$('sidebarToggle').onclick = () => $('sidebar').classList.toggle('closed');
+$('sidebarClose').onclick  = () => $('sidebar').classList.add('closed');
 
-// ── View Switch ───────────────────────────────────────────────────────────────
-viewTabs.forEach(tab => {
-  tab.onclick = () => {
-    view = tab.dataset.view;
-    viewTabs.forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    render();
-  };
+/* ── View Switching ──────────────────────────────────────────── */
+document.querySelectorAll('.view-tab').forEach(btn => {
+  btn.onclick = () => switchView(btn.dataset.view);
 });
 
-// ── Render Controller ─────────────────────────────────────────────────────────
+function switchView(v) {
+  view = v;
+  document.querySelectorAll('.view-tab')
+    .forEach(b => b.classList.toggle('active', b.dataset.view === v));
+  render();
+}
+
+/* ── Keyboard ────────────────────────────────────────────────── */
+document.addEventListener('keydown', e => {
+  const tag = document.activeElement?.tagName;
+  const inp = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
+  if (e.key === 'Escape') { closeAll(); return; }
+  if (inp) return;
+  if (e.key === 'ArrowLeft')  $('prevBtn').click();
+  if (e.key === 'ArrowRight') $('nextBtn').click();
+  if (e.key === 'm') switchView('month');
+  if (e.key === 'w') switchView('week');
+  if (e.key === 'd') switchView('day');
+  if (e.key === 't') $('todayBtn').click();
+});
+
+function closeAll() {
+  $('detailOv').classList.add('hidden');
+  $('dayPopOv').classList.add('hidden');
+}
+
+/* ================================================================
+   RENDER CONTROLLER
+   ================================================================ */
 function render() {
-  updateTitles();
+  updateTitle();
+  renderLegend();
   renderUpcoming();
-  if (view === 'month') {
-    viewMonth.classList.remove('hidden');
-    viewWeek.classList.add('hidden');
-    viewDay.classList.add('hidden');
-    renderMonth();
-  } else if (view === 'week') {
-    viewMonth.classList.add('hidden');
-    viewWeek.classList.remove('hidden');
-    viewDay.classList.add('hidden');
-    renderWeek();
-  } else {
-    viewMonth.classList.add('hidden');
-    viewWeek.classList.add('hidden');
-    viewDay.classList.remove('hidden');
-    renderDay();
-  }
+
+  $('vMonth').classList.toggle('hidden', view !== 'month');
+  $('vWeek').classList.toggle('hidden',  view !== 'week');
+  $('vDay').classList.toggle('hidden',   view !== 'day');
+
+  if (view === 'month') renderMonth();
+  else if (view === 'week') renderWeek();
+  else renderDay();
 }
 
-function updateTitles() {
-  const m = MONTHS[cursor.getMonth()];
+function updateTitle() {
+  const m = MONTH_NAMES[cursor.getMonth()];
   const y = cursor.getFullYear();
-  miniTitle.textContent = `${m.slice(0,3)} ${y}`;
-  if (view === 'month') mainTitle.textContent = `${m} ${y}`;
-  else if (view === 'week') {
-    const ws = getWeekStart(cursor);
-    const we = new Date(ws); we.setDate(ws.getDate() + 6);
-    mainTitle.textContent = ws.getMonth() === we.getMonth()
-      ? `${MONTHS[ws.getMonth()].slice(0,3)} ${ws.getDate()}–${we.getDate()}, ${ws.getFullYear()}`
-      : `${MONTHS[ws.getMonth()].slice(0,3)} ${ws.getDate()} – ${MONTHS[we.getMonth()].slice(0,3)} ${we.getDate()}`;
+  if (view === 'month') {
+    $('calTitle').textContent = `${m} ${y}`;
+  } else if (view === 'week') {
+    const ws = weekStart(cursor);
+    const we = new Date(ws); we.setDate(ws.getDate()+6);
+    $('calTitle').textContent =
+      ws.getMonth() === we.getMonth()
+        ? `${MONTH_NAMES[ws.getMonth()].slice(0,3)} ${ws.getDate()}–${we.getDate()}, ${y}`
+        : `${MONTH_NAMES[ws.getMonth()].slice(0,3)} ${ws.getDate()} – ${MONTH_NAMES[we.getMonth()].slice(0,3)} ${we.getDate()}`;
   } else {
-    mainTitle.textContent = `${DAYS[dayViewDate.getDay()]} ${dayViewDate.getDate()} ${MONTHS[dayViewDate.getMonth()]} ${dayViewDate.getFullYear()}`;
+    $('calTitle').textContent =
+      `${DAY_NAMES[dayDate.getDay()]} ${dayDate.getDate()} ${MONTH_NAMES[dayDate.getMonth()]} ${dayDate.getFullYear()}`;
   }
 }
 
-// ── Month View ─────────────────────────────────────────────────────────────────
+function renderLegend() {
+  const el = $('legend');
+  el.innerHTML = '';
+  Object.entries(PRESET_CATS).forEach(([key, cat]) => {
+    const d = document.createElement('div'); d.className = 'leg-item';
+    d.innerHTML = `<div class="leg-dot" style="background:${cat.color}"></div>${cat.label}`;
+    el.appendChild(d);
+  });
+  // custom
+  const d = document.createElement('div'); d.className = 'leg-item';
+  d.innerHTML = `<div class="leg-dot" style="background:${CUSTOM_COLOR}"></div>Custom`;
+  el.appendChild(d);
+}
+
+/* ================================================================
+   MONTH VIEW — span-bar rendering algorithm
+   ================================================================
+
+   For each week row (7 days), we compute which events are "active"
+   and assign them to visual "lanes" (rows of bars). An event keeps
+   the same lane across rows so bars look continuous.
+
+   Result: events that span multiple weeks show as a bar that
+   starts at the left edge and ends at the right edge of each row,
+   with the title only shown on the start cell.
+   ================================================================ */
 function renderMonth() {
-  // Header
-  calHeader.innerHTML = DAYS.map(d => `<div class="cal-dow">${d}</div>`).join('');
+  /* -- day-of-week header -- */
+  const dowBar = $('dowBar');
+  dowBar.innerHTML = DAY_NAMES.map(d => `<div class="dow-cell">${d}</div>`).join('');
+
+  const grid = $('monthGrid');
+  grid.innerHTML = '';
 
   const y = cursor.getFullYear();
   const m = cursor.getMonth();
-  const firstDay = new Date(y, m, 1).getDay();
+  const firstDow = new Date(y, m, 1).getDay();
   const daysInMonth = new Date(y, m+1, 0).getDate();
-  const prevDays  = new Date(y, m, 0).getDate();
-  const todayStr  = dateStr(today);
+  const prevMonthDays = new Date(y, m, 0).getDate();
+  const tStr = todayStr();
+  const totalCells = Math.ceil((firstDow + daysInMonth) / 7) * 7;
+  const numRows = totalCells / 7;
 
-  calGrid.innerHTML = '';
-
-  const totalCells = Math.ceil((firstDay + daysInMonth) / 7) * 7;
-
+  /* Build date strings for all cells */
+  const cellDates = [];
   for (let i = 0; i < totalCells; i++) {
-    const cell = document.createElement('div');
-    cell.className = 'cal-cell';
-    cell.style.animationDelay = `${(i % 7) * 0.03}s`;
-
-    let cellDate, isOtherMonth = false;
-    if (i < firstDay) {
-      cellDate = new Date(y, m-1, prevDays - firstDay + i + 1);
-      isOtherMonth = true;
-    } else if (i >= firstDay + daysInMonth) {
-      cellDate = new Date(y, m+1, i - firstDay - daysInMonth + 1);
-      isOtherMonth = true;
+    let date, other = false;
+    if (i < firstDow) {
+      date = new Date(y, m-1, prevMonthDays - firstDow + i + 1); other = true;
+    } else if (i >= firstDow + daysInMonth) {
+      date = new Date(y, m+1, i - firstDow - daysInMonth + 1); other = true;
     } else {
-      cellDate = new Date(y, m, i - firstDay + 1);
+      date = new Date(y, m, i - firstDow + 1);
     }
+    cellDates.push({ date, dStr: ds(date), other });
+  }
 
-    const dStr = dateStr(cellDate);
-    if (isOtherMonth) cell.classList.add('other-month');
-    if (dStr === todayStr) cell.classList.add('today');
+  /* Sort events: longer first (so big spans claim top lanes) */
+  const sortedEvents = [...events].sort((a,b) => {
+    const lenA = (pd(a.end) - pd(a.start)) / 86400000;
+    const lenB = (pd(b.end) - pd(b.start)) / 86400000;
+    return lenB - lenA;
+  });
 
-    // Day number
-    const num = document.createElement('div');
-    num.className = 'day-num';
-    num.textContent = cellDate.getDate();
-    cell.appendChild(num);
+  /* Per-cell: array of lanes. lanes[lane] = event id or null */
+  const cellLanes = Array.from({length: totalCells}, () => []);
 
-    // Events on this day
-    const dayEvents = getEventsOnDate(dStr);
-    const MAX_SHOW = 3;
-    dayEvents.slice(0, MAX_SHOW).forEach(ev => {
-      const pill = document.createElement('div');
-      pill.className = `ev-pill ${ev.category}`;
-      pill.textContent = `${CAT_ICONS[ev.category]} ${ev.title}`;
-      pill.title = ev.title;
-      pill.onclick = e => { e.stopPropagation(); openDetail(ev.id); };
-      cell.appendChild(pill);
-    });
-    if (dayEvents.length > MAX_SHOW) {
-      const more = document.createElement('div');
-      more.className = 'more-events';
-      more.textContent = `+${dayEvents.length - MAX_SHOW} more`;
-      more.onclick = e => { e.stopPropagation(); openDayModal(dStr, cellDate); };
-      cell.appendChild(more);
+  /* Track which lane each event occupies (per row) */
+  const evLaneMap = {}; // evId -> lane index (same for whole event)
+
+  /* Assign lanes */
+  sortedEvents.forEach(ev => {
+    // Find all cell indices this event covers
+    const coveredCells = [];
+    for (let ci = 0; ci < totalCells; ci++) {
+      const dStr = cellDates[ci].dStr;
+      if (dStr >= ev.start && dStr <= ev.end) coveredCells.push(ci);
     }
+    if (coveredCells.length === 0) return;
 
-    cell.onclick = () => openDayModal(dStr, cellDate);
-    calGrid.appendChild(cell);
+    // Find lowest lane that is free for ALL covered cells in the same row
+    // Events must use same lane across their entire span
+    let lane = 0;
+    let found = false;
+    while (!found) {
+      found = coveredCells.every(ci => !cellLanes[ci][lane]);
+      if (!found) lane++;
+    }
+    evLaneMap[ev.id] = lane;
+    coveredCells.forEach(ci => { cellLanes[ci][lane] = ev.id; });
+  });
+
+  /* Build DOM */
+  for (let rowIdx = 0; rowIdx < numRows; rowIdx++) {
+    for (let colIdx = 0; colIdx < 7; colIdx++) {
+      const ci = rowIdx * 7 + colIdx;
+      const { date, dStr, other } = cellDates[ci];
+
+      const cell = document.createElement('div');
+      cell.className = 'day-cell'
+        + (other ? ' dim' : '')
+        + (dStr === tStr ? ' today' : '');
+      cell.style.animationDelay = `${colIdx * 0.025}s`;
+
+      /* Day number */
+      const num = document.createElement('div');
+      num.className = 'day-num';
+      num.textContent = date.getDate();
+      cell.appendChild(num);
+
+      /* Event bars for this cell */
+      const laneCount = cellLanes[ci].length;
+      const MAX_LANES = 3; // how many bars to show before "+N more"
+      let shown = 0;
+      const overflow = [];
+
+      for (let lane = 0; lane < laneCount; lane++) {
+        const evId = cellLanes[ci][lane];
+        if (!evId) {
+          // Empty lane — add spacer to preserve lane positions
+          if (shown < MAX_LANES) {
+            const spacer = document.createElement('div');
+            spacer.style.height = '18px';
+            cell.appendChild(spacer);
+            shown++;
+          }
+          continue;
+        }
+        const ev = sortedEvents.find(e => e.id === evId);
+        if (!ev) continue;
+
+        if (shown < MAX_LANES) {
+          const isStart    = dStr === ev.start;
+          const isEnd      = dStr === ev.end;
+          const isRangeEv  = ev.start !== ev.end;
+
+          // Is this the first cell of this event in THIS row?
+          const isRowStart = colIdx === 0 || cellDates[ci-1]?.dStr < ev.start || colIdx === 0;
+          // Actually: show title only if this is the true start OR the leftmost visible cell in this row
+          const isFirstInRow = (colIdx === 0) || (dStr === ev.start);
+          const isLastInRow  = (colIdx === 6) || (dStr === ev.end);
+
+          let shape;
+          if (!isRangeEv) {
+            shape = 'single';
+          } else if (isFirstInRow && isLastInRow) {
+            shape = 'single'; // fills just this segment of row
+          } else if (isFirstInRow) {
+            shape = 'range-start';
+          } else if (isLastInRow) {
+            shape = 'range-end';
+          } else {
+            shape = 'range-mid';
+          }
+
+          const bar = document.createElement('div');
+          bar.className = `ev-bar ${catClass(ev)} ${shape}`;
+
+          // Title visible only at true start or leftmost row position
+          const showTitle = isFirstInRow;
+          const label = ev.category === ''
+            ? ev.customLabel
+            : `${catIcon(ev)} ${ev.title}`;
+          bar.innerHTML = `<span class="bar-text">${showTitle ? label : ''}</span>`;
+          if (!showTitle) bar.setAttribute('aria-hidden','true');
+
+          bar.title = `${ev.title} (${fmtDate(ev.start)}${ev.start !== ev.end ? ' → '+fmtDate(ev.end) : ''})`;
+          bar.onclick = e => { e.stopPropagation(); openDetail(ev.id); };
+          cell.appendChild(bar);
+          shown++;
+        } else {
+          // Only count unique events for overflow
+          if (!overflow.includes(evId)) overflow.push(evId);
+        }
+      }
+
+      if (overflow.length > 0) {
+        const more = document.createElement('div');
+        more.className = 'more-btn';
+        more.textContent = `+${overflow.length} more`;
+        more.onclick = e => { e.stopPropagation(); openDayModal(dStr, date); };
+        cell.appendChild(more);
+      }
+
+      cell.onclick = () => openDayModal(dStr, date);
+      grid.appendChild(cell);
+    }
   }
 }
 
-// ── Week View ─────────────────────────────────────────────────────────────────
-function getWeekStart(d) {
-  const day = d.getDay();
-  const result = new Date(d);
-  result.setDate(d.getDate() - day + (d.getMonth() !== cursor.getMonth() ? 0 : 0));
-  // Use cursor month's first day's week start
-  const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
-  const ws = new Date(first);
-  ws.setDate(first.getDate() - first.getDay());
+/* ================================================================
+   WEEK VIEW
+   ================================================================ */
+function weekStart(d) {
+  const ws = new Date(d.getFullYear(), d.getMonth(), 1);
+  ws.setDate(ws.getDate() - ws.getDay());
   return ws;
 }
 
 function renderWeek() {
-  const weekEl = document.getElementById('weekGrid');
-  weekEl.innerHTML = '';
+  const HOURS = Array.from({length:24},(_,i)=>i);
+  const tStr  = todayStr();
+  const ws    = weekStart(cursor);
 
-  const ws = getWeekStart(cursor);
-  const todayStr = dateStr(today);
-  const HOURS = Array.from({length:24}, (_,i)=>i);
-
-  // Time column
-  const timeCol = document.createElement('div');
-  timeCol.className = 'week-time-col';
+  /* Time gutter */
+  const gut = $('wGutter'); gut.innerHTML = '';
+  gut.innerHTML = `<div class="gutter-spacer" style="height:46px"></div>`;
   HOURS.forEach(h => {
-    const lbl = document.createElement('div');
-    lbl.className = 'week-time-label';
-    lbl.textContent = h === 0 ? '' : `${h}:00`;
-    timeCol.appendChild(lbl);
+    const el = document.createElement('div'); el.className = 't-label';
+    el.textContent = h === 0 ? '' : `${String(h).padStart(2,'0')}:00`;
+    gut.appendChild(el);
   });
-  weekEl.appendChild(timeCol);
 
-  // Days columns
-  const daysWrap = document.createElement('div');
-  daysWrap.className = 'week-days';
-
+  const cols = $('weekCols'); cols.innerHTML = '';
   for (let d = 0; d < 7; d++) {
-    const date = new Date(ws); date.setDate(ws.getDate() + d);
-    const dStr = dateStr(date);
-    const col  = document.createElement('div');
-    col.className = 'week-day-col';
-    if (dStr === todayStr) col.classList.add('today-col');
+    const date  = new Date(ws); date.setDate(ws.getDate() + d);
+    const dStr  = ds(date);
+    const col   = document.createElement('div'); col.className = 'w-day-col';
+    if (dStr === tStr) col.classList.add('today-col');
 
-    // Header
-    const header = document.createElement('div');
-    header.className = 'week-day-header';
-    header.innerHTML = `<div class="week-day-name">${DAYS[d]}</div><div class="week-day-num">${date.getDate()}</div>`;
-    header.onclick = () => { view = 'day'; dayViewDate = new Date(date); render(); };
-    col.appendChild(header);
+    /* Header */
+    const head = document.createElement('div'); head.className = 'w-day-head';
+    head.innerHTML = `<div class="w-day-name">${DAY_NAMES[d]}</div><div class="w-day-num">${date.getDate()}</div>`;
+    head.onclick = () => { dayDate = new Date(date); switchView('day'); };
+    col.appendChild(head);
 
-    // Body
-    const body = document.createElement('div');
-    body.className = 'week-day-body';
-
-    HOURS.forEach(h => {
-      const slot = document.createElement('div');
-      slot.className = 'week-hour-slot half';
+    /* Body with hour slots */
+    const body = document.createElement('div'); body.className = 'w-day-body';
+    HOURS.forEach(() => {
+      const slot = document.createElement('div'); slot.className = 'h-slot';
       body.appendChild(slot);
     });
 
-    // Now line
-    if (dStr === todayStr) {
+    /* Now line */
+    if (dStr === tStr) {
       const now = new Date();
-      const pct = (now.getHours() * 60 + now.getMinutes()) / (24*60) * 100;
-      const line = document.createElement('div');
-      line.className = 'week-now-line';
-      line.style.top = pct + '%';
+      const line = document.createElement('div'); line.className = 'now-line';
+      line.style.top = `${(now.getHours()*60+now.getMinutes())/60*60}px`;
       body.appendChild(line);
     }
 
-    // Events
-    getEventsOnDate(dStr).forEach(ev => {
-      const el = document.createElement('div');
-      el.className = `week-ev ${ev.category}`;
-      el.style.cssText = getTimeStyle(ev, 60);
-      el.textContent = ev.title;
-      el.onclick = e => { e.stopPropagation(); openDetail(ev.id); };
+    /* Events */
+    eventsOnDate(dStr).forEach(ev => {
+      const el = buildTimeEv(ev, 60, 'w-ev t-ev');
       body.appendChild(el);
     });
 
     col.appendChild(body);
-    daysWrap.appendChild(col);
+    cols.appendChild(col);
   }
-
-  weekEl.appendChild(daysWrap);
 }
 
-// ── Day View ──────────────────────────────────────────────────────────────────
+/* ================================================================
+   DAY VIEW
+   ================================================================ */
 function renderDay() {
-  const dv = document.getElementById('dayView');
-  dv.innerHTML = '';
+  const HOURS = Array.from({length:24},(_,i)=>i);
+  const dStr   = ds(dayDate);
+  const tStr   = todayStr();
 
-  const dStr    = dateStr(dayViewDate);
-  const todayStr = dateStr(today);
-  const HOURS   = Array.from({length:24}, (_,i)=>i);
-
-  // Header banner
-  const banner = document.createElement('div');
-  banner.className = 'day-header-banner';
-  banner.innerHTML = `
-    <div class="day-header-big">${dayViewDate.getDate()}</div>
-    <div class="day-header-sub">${DAYS[dayViewDate.getDay()]}, ${MONTHS[dayViewDate.getMonth()]} ${dayViewDate.getFullYear()}${dStr===todayStr?' — Today':''}</div>
+  /* Banner */
+  $('dayBanner').innerHTML = `
+    <div class="day-big">${dayDate.getDate()}</div>
+    <div class="day-meta">${DAY_NAMES[dayDate.getDay()]}, ${MONTH_NAMES[dayDate.getMonth()]} ${dayDate.getFullYear()}${dStr===tStr ? ' · Today' : ''}</div>
   `;
 
-  const inner = document.createElement('div');
-  inner.style.cssText = 'flex:1;display:flex;overflow:hidden;';
-
-  // Time col
-  const timeCol = document.createElement('div');
-  timeCol.className = 'day-time-col';
+  /* Gutter */
+  const gut = $('dGutter'); gut.innerHTML = '';
   HOURS.forEach(h => {
-    const lbl = document.createElement('div');
-    lbl.className = 'day-time-label';
-    lbl.textContent = h === 0 ? '' : `${h}:00`;
-    timeCol.appendChild(lbl);
+    const el = document.createElement('div'); el.className = 't-label';
+    el.textContent = h === 0 ? '' : `${String(h).padStart(2,'0')}:00`;
+    gut.appendChild(el);
   });
 
-  // Events col
-  const evCol = document.createElement('div');
-  evCol.className = 'day-events-col';
-  HOURS.forEach(h => {
-    const slot = document.createElement('div');
-    slot.className = 'day-hour-slot half';
-    evCol.appendChild(slot);
+  /* Body */
+  const cols = $('dayCols'); cols.innerHTML = '';
+  const body = document.createElement('div');
+  body.style.cssText = 'flex:1;position:relative;overflow-y:auto;';
+
+  HOURS.forEach(() => {
+    const slot = document.createElement('div'); slot.className = 'h-slot';
+    body.appendChild(slot);
   });
 
-  // Now line
-  if (dStr === todayStr) {
-    const now = new Date();
-    const pct = (now.getHours() * 60 + now.getMinutes()) / (24*60) * 100;
-    const line = document.createElement('div');
-    line.className = 'day-now-line';
-    line.style.top = pct + '%';
-    evCol.appendChild(line);
+  if (dStr === tStr) {
+    const now  = new Date();
+    const line = document.createElement('div'); line.className = 'now-line';
+    line.style.top = `${(now.getHours()*60+now.getMinutes())/60*60}px`;
+    body.appendChild(line);
   }
 
-  // Events
-  getEventsOnDate(dStr).forEach(ev => {
-    const el = document.createElement('div');
-    el.className = `day-ev ${ev.category}`;
-    el.style.cssText = getTimeStyle(ev, 64);
-    el.innerHTML = `<div class="ev-time">${formatTime(ev.startTime)} – ${formatTime(ev.endTime)}</div>${CAT_ICONS[ev.category]} ${ev.title}`;
-    el.onclick = () => openDetail(ev.id);
-    evCol.appendChild(el);
+  eventsOnDate(dStr).forEach(ev => {
+    const el = buildTimeEv(ev, 60, 'd-ev t-ev');
+    el.style.left = '4px'; el.style.right = '4px';
+    body.appendChild(el);
   });
 
-  inner.appendChild(timeCol);
-  inner.appendChild(evCol);
-
-  const wrapper = document.createElement('div');
-  wrapper.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden;';
-  wrapper.appendChild(banner);
-  wrapper.appendChild(inner);
-  dv.appendChild(wrapper);
+  cols.appendChild(body);
 }
 
-// ── Time Positioning Helper ───────────────────────────────────────────────────
-function getTimeStyle(ev, hourHeight) {
-  const [sh,sm] = ev.startTime.split(':').map(Number);
-  const [eh,em] = ev.endTime.split(':').map(Number);
-  const top      = (sh * 60 + sm) / 60 * hourHeight;
-  let   height   = ((eh * 60 + em) - (sh * 60 + sm)) / 60 * hourHeight;
+/* ── Build time-positioned event element ─────────────────────── */
+function buildTimeEv(ev, hourH, extraClass) {
+  const [sh, sm] = ev.startTime.split(':').map(Number);
+  const [eh, em] = ev.endTime.split(':').map(Number);
+  const top    = (sh*60+sm)/60*hourH;
+  let   height = ((eh*60+em)-(sh*60+sm))/60*hourH;
   if (height < 18) height = 18;
-  const color    = CAT_COLORS[ev.category];
-  return `
-    top: ${top}px;
-    height: ${height}px;
-    background: ${color}22;
-    border-left: 3px solid ${color};
-    color: ${color};
+
+  const color = catColor(ev);
+  const el = document.createElement('div');
+  el.className = `${extraClass} ${catClass(ev)}`;
+  el.style.cssText = `
+    top:${top}px; height:${height}px;
+    background:${color}20;
+    border-left:3px solid ${color};
+    color:${color};
   `;
+  const label = ev.category === '' ? ev.customLabel : `${catIcon(ev)} ${ev.title}`;
+  el.innerHTML = `
+    <div class="ev-time">${fmtTime(ev.startTime)} – ${fmtTime(ev.endTime)}</div>
+    <div class="ev-label">${label}</div>
+  `;
+  el.onclick = () => openDetail(ev.id);
+  return el;
 }
 
-// ── Events on a Date ──────────────────────────────────────────────────────────
-function getEventsOnDate(dStr) {
-  return events.filter(ev => {
-    return dStr >= ev.start && dStr <= (ev.end || ev.start);
-  }).sort((a,b) => a.startTime.localeCompare(b.startTime));
+/* ── Events active on a date ─────────────────────────────────── */
+function eventsOnDate(dStr) {
+  return events
+    .filter(e => dStr >= e.start && dStr <= (e.end||e.start))
+    .sort((a,b) => a.startTime.localeCompare(b.startTime));
 }
 
-// ── Upcoming Sidebar ──────────────────────────────────────────────────────────
+/* ── Upcoming sidebar ────────────────────────────────────────── */
 function renderUpcoming() {
-  const todayStr = dateStr(today);
-  const upcoming = events
-    .filter(ev => ev.end >= todayStr || ev.start >= todayStr)
+  const tStr = todayStr();
+  const list = events
+    .filter(e => (e.end||e.start) >= tStr)
     .sort((a,b) => a.start.localeCompare(b.start) || a.startTime.localeCompare(b.startTime))
     .slice(0, 8);
 
-  upcomingList.innerHTML = '';
-  if (!upcoming.length) {
-    upcomingList.innerHTML = '<div class="no-events" style="padding:10px 0">No upcoming events</div>';
+  const el = $('upcomingList'); el.innerHTML = '';
+  if (!list.length) {
+    el.innerHTML = '<div class="up-empty">No upcoming events ✨</div>';
     return;
   }
-  upcoming.forEach((ev, i) => {
-    const item = document.createElement('div');
-    item.className = 'upcoming-item';
+  list.forEach((ev, i) => {
+    const item = document.createElement('div'); item.className = 'up-item';
     item.style.animationDelay = `${i * 0.05}s`;
+    const label = ev.category === '' ? ev.customLabel : `${catIcon(ev)} ${ev.title}`;
     item.innerHTML = `
-      <div class="upcoming-dot" style="background:${CAT_COLORS[ev.category]}"></div>
-      <div class="upcoming-info">
-        <div class="upcoming-title">${CAT_ICONS[ev.category]} ${ev.title}</div>
-        <div class="upcoming-date">${formatDate(ev.start)}${ev.start!==ev.end ? ` → ${formatDate(ev.end)}` : ''} · ${formatTime(ev.startTime)}</div>
+      <div class="up-color" style="background:${catColor(ev)}"></div>
+      <div style="min-width:0;flex:1">
+        <div class="up-title">${label}</div>
+        <div class="up-date">${fmtDate(ev.start)}${ev.start!==ev.end ? ' → '+fmtDate(ev.end) : ''} · ${fmtTime(ev.startTime)}</div>
       </div>
     `;
     item.onclick = () => openDetail(ev.id);
-    upcomingList.appendChild(item);
+    el.appendChild(item);
   });
 }
 
-// ── Day Modal ─────────────────────────────────────────────────────────────────
-let dayModalCurrentDate = null;
-function openDayModal(dStr, dateObj) {
-  dayModalCurrentDate = dStr;
-  dayModalTitle.textContent = `${DAYS[dateObj.getDay()]} ${dateObj.getDate()} ${MONTHS[dateObj.getMonth()]}`;
-  const dayEvs = getEventsOnDate(dStr);
-  dayModalEvents.innerHTML = '';
-  if (!dayEvs.length) {
-    dayModalEvents.innerHTML = '<div class="no-events">No events this day</div>';
-  } else {
-    dayEvs.forEach(ev => {
-      const row = document.createElement('div');
-      row.className = 'day-modal-ev';
-      row.innerHTML = `
-        <div class="dot" style="background:${CAT_COLORS[ev.category]}"></div>
-        <div class="info">
-          <div class="title">${CAT_ICONS[ev.category]} ${ev.title}</div>
-          <div class="time">${formatTime(ev.startTime)} – ${formatTime(ev.endTime)}</div>
-        </div>
-      `;
-      row.onclick = () => { closeDayModal(); openDetail(ev.id); };
-      dayModalEvents.appendChild(row);
-    });
-  }
-  dayModal.classList.remove('hidden');
-}
-function closeDayModal() { dayModal.classList.add('hidden'); }
-dayModalClose.onclick = closeDayModal;
-dayModal.onclick = e => { if (e.target === dayModal) closeDayModal(); };
-dayModalAdd.onclick = () => {
-  closeDayModal();
-  document.getElementById('evStart').value = dayModalCurrentDate;
-  document.getElementById('evEnd').value   = dayModalCurrentDate;
-  document.getElementById('evTitle').focus();
-  if (sidebar.classList.contains('collapsed')) sidebar.classList.remove('collapsed');
-};
-
-// ── Detail Modal ──────────────────────────────────────────────────────────────
+/* ── Detail modal ────────────────────────────────────────────── */
 function openDetail(id) {
   const ev = events.find(e => e.id === id);
   if (!ev) return;
-  editingEventId = id;
+  detailId = id;
 
-  document.getElementById('detailStripe').style.background = CAT_COLORS[ev.category];
-  document.getElementById('detailIcon').textContent  = CAT_ICONS[ev.category];
-  document.getElementById('detailTitle').textContent = ev.title;
+  const color = catColor(ev);
+  const label = ev.category === '' ? ev.customLabel : `${catIcon(ev)} ${ev.title}`;
 
-  const meta = document.getElementById('detailMeta');
-  meta.innerHTML = `
-    <div class="detail-meta-row"><span>📅</span><span>${formatDate(ev.start)}${ev.start!==ev.end ? ` — ${formatDate(ev.end)}` : ''}</span></div>
-    <div class="detail-meta-row"><span>🕐</span><span>${formatTime(ev.startTime)} – ${formatTime(ev.endTime)}</span></div>
-    <div class="detail-meta-row"><span>🏷</span><span>${ev.category.charAt(0).toUpperCase()+ev.category.slice(1)}</span></div>
+  $('modalAccent').style.background = color;
+  $('dIcon').textContent = catIcon(ev);
+  $('dTitle').textContent = ev.title;
+
+  $('dMeta').innerHTML = `
+    <li><span class="mi">📅</span><span class="mv">${fmtDate(ev.start)}${ev.start!==ev.end?' → '+fmtDate(ev.end):''}</span></li>
+    <li><span class="mi">🕐</span><span class="mv">${fmtTime(ev.startTime)} – ${fmtTime(ev.endTime)}</span></li>
+    <li><span class="mi">🏷</span><span class="mv">${ev.category===''?ev.customLabel:(PRESET_CATS[ev.category]?.label||ev.category)}</span></li>
   `;
 
-  const noteEl = document.getElementById('detailNote');
-  noteEl.textContent = ev.note || '';
-  noteEl.style.display = ev.note ? 'block' : 'none';
+  const note = $('dNote');
+  note.textContent = ev.note || '';
+  note.style.display = ev.note ? 'block' : 'none';
 
-  detailModal.classList.remove('hidden');
+  $('detailOv').classList.remove('hidden');
 }
-function closeDetail() { detailModal.classList.add('hidden'); editingEventId = null; }
-detailClose.onclick = closeDetail;
-detailModal.onclick = e => { if (e.target === detailModal) closeDetail(); };
-deleteEventBtn.onclick = () => {
-  if (!editingEventId) return;
-  events = events.filter(e => e.id !== editingEventId);
-  save(); render(); closeDetail();
+
+$('detailClose').onclick = () => $('detailOv').classList.add('hidden');
+$('detailOv').onclick    = e => { if (e.target === $('detailOv')) $('detailOv').classList.add('hidden'); };
+$('delBtn').onclick      = () => {
+  if (!detailId) return;
+  events = events.filter(e => e.id !== detailId);
+  save(); render();
+  $('detailOv').classList.add('hidden');
 };
 
-// ── Keyboard Shortcuts ────────────────────────────────────────────────────────
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeDetail(); closeDayModal(); }
-  if (e.key === 'ArrowLeft'  && !isInputFocused()) { mainPrev.click(); }
-  if (e.key === 'ArrowRight' && !isInputFocused()) { mainNext.click(); }
-  if (e.key === 'm' && !isInputFocused()) { switchView('month'); }
-  if (e.key === 'w' && !isInputFocused()) { switchView('week');  }
-  if (e.key === 'd' && !isInputFocused()) { switchView('day');   }
-  if (e.key === 't' && !isInputFocused()) { todayBtn.click();    }
-});
-function isInputFocused() {
-  const t = document.activeElement?.tagName;
-  return t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT';
-}
-function switchView(v) {
-  view = v;
-  viewTabs.forEach(t => t.classList.toggle('active', t.dataset.view === v));
-  render();
+/* ── Day popup modal ─────────────────────────────────────────── */
+function openDayModal(dStr, dateObj) {
+  dmDate = dStr;
+  $('dayPopTitle').textContent =
+    `${DAY_NAMES[dateObj.getDay()]} ${dateObj.getDate()} ${MONTH_NAMES[dateObj.getMonth()]} ${dateObj.getFullYear()}`;
+
+  const evs  = eventsOnDate(dStr);
+  const list = $('dayPopList'); list.innerHTML = '';
+
+  if (!evs.length) {
+    list.innerHTML = '<div class="dp-empty">No events — add one 👇</div>';
+  } else {
+    evs.forEach(ev => {
+      const row = document.createElement('div'); row.className = 'dp-item';
+      const lbl = ev.category==='' ? ev.customLabel : `${catIcon(ev)} ${ev.title}`;
+      row.innerHTML = `
+        <div class="dp-dot" style="background:${catColor(ev)}"></div>
+        <div>
+          <div class="dp-title">${lbl}</div>
+          <div class="dp-time">${fmtTime(ev.startTime)} – ${fmtTime(ev.endTime)}</div>
+        </div>
+      `;
+      row.onclick = () => { closeDayModal(); openDetail(ev.id); };
+      list.appendChild(row);
+    });
+  }
+  $('dayPopOv').classList.remove('hidden');
 }
 
-// ── Animation Helpers ─────────────────────────────────────────────────────────
+function closeDayModal() { $('dayPopOv').classList.add('hidden'); }
+$('dayPopClose').onclick = closeDayModal;
+$('dayPopOv').onclick    = e => { if (e.target === $('dayPopOv')) closeDayModal(); };
+$('quickAddBtn').onclick = () => {
+  closeDayModal();
+  $('fStart').value = dmDate || '';
+  $('fEnd').value   = dmDate || '';
+  $('fTitle').focus();
+  $('sidebar').classList.remove('closed');
+};
+
+/* ── Animation helpers ───────────────────────────────────────── */
 function shake(el) {
-  el.style.animation = 'none'; void el.offsetWidth;
-  el.style.animation = 'shake 0.35s ease';
-  el.addEventListener('animationend', () => el.style.animation = '', { once: true });
+  el.classList.remove('shake');
+  void el.offsetWidth;
+  el.classList.add('shake');
+  el.addEventListener('animationend', () => el.classList.remove('shake'), {once:true});
+}
+function popAnim(el) {
+  el.classList.remove('popBounce');
+  void el.offsetWidth;
+  el.classList.add('popBounce');
+  el.addEventListener('animationend', () => el.classList.remove('popBounce'), {once:true});
 }
 
-// ── Sample Events ─────────────────────────────────────────────────────────────
-function loadSampleIfEmpty() {
+/* ── Sample data ─────────────────────────────────────────────── */
+function loadSamples() {
   if (events.length > 0) return;
-  const y = today.getFullYear();
-  const m = String(today.getMonth()+1).padStart(2,'0');
-  const d = String(today.getDate()).padStart(2,'0');
-
-  const next = (offset) => {
-    const dt = new Date(today); dt.setDate(today.getDate() + offset);
-    return dateStr(dt);
-  };
-
+  const next = o => { const d = new Date(today); d.setDate(today.getDate()+o); return ds(d); };
   events = [
-    { id:genId(), title:'🎓 Study JavaScript Basics', category:'study',    start:next(0),  end:next(4),  startTime:'09:00', endTime:'11:00', note:'Cover: variables, functions, DOM manipulation' },
-    { id:genId(), title:'📝 Portfolio Review',        category:'work',     start:next(1),  end:next(1),  startTime:'14:00', endTime:'15:30', note:'Review and update portfolio projects' },
-    { id:genId(), title:'🤝 Team Meeting',            category:'meet',     start:next(2),  end:next(2),  startTime:'10:00', endTime:'11:00', note:'' },
-    { id:genId(), title:'💪 Morning Run',             category:'health',   start:next(0),  end:next(6),  startTime:'07:00', endTime:'07:45', note:'5km every morning' },
-    { id:genId(), title:'🔥 Project Deadline',        category:'deadline', start:next(7),  end:next(7),  startTime:'17:00', endTime:'18:00', note:'Submit final project' },
-    { id:genId(), title:'✨ Personal Dev',            category:'personal', start:next(3),  end:next(5),  startTime:'20:00', endTime:'21:30', note:'Read: Clean Code book' },
+    { id:genId(), title:'Study JavaScript',       category:'study',    customLabel:'', start:next(0),  end:next(6),  startTime:'09:00', endTime:'11:00', note:'Cover: variables, functions, async/await, DOM' },
+    { id:genId(), title:'Portfolio Review',       category:'work',     customLabel:'', start:next(1),  end:next(1),  startTime:'14:00', endTime:'15:30', note:'Review and polish all 3 projects' },
+    { id:genId(), title:'Morning Workout',        category:'health',   customLabel:'', start:next(0),  end:next(13), startTime:'07:00', endTime:'07:45', note:'5km run every morning' },
+    { id:genId(), title:'Team Sync',              category:'meet',     customLabel:'', start:next(2),  end:next(2),  startTime:'10:00', endTime:'11:00', note:'' },
+    { id:genId(), title:'Project Deadline',       category:'deadline', customLabel:'', start:next(8),  end:next(8),  startTime:'17:00', endTime:'18:00', note:'Final submission' },
+    { id:genId(), title:'Clean Code reading',     category:'personal', customLabel:'', start:next(4),  end:next(9),  startTime:'20:00', endTime:'21:30', note:'Chapters 4–7' },
+    { id:genId(), title:'🎸 Guitar Practice',    category:'',         customLabel:'🎸 Guitar Practice', start:next(3), end:next(10), startTime:'18:00', endTime:'19:00', note:'Custom category demo' },
   ];
   save();
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-loadSampleIfEmpty();
+/* ── Init ────────────────────────────────────────────────────── */
+loadSamples();
 render();
-
-// Inject shake keyframe
-const styleEl = document.createElement('style');
-styleEl.textContent = `@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}`;
-document.head.appendChild(styleEl);
