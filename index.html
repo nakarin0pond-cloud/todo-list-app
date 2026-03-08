@@ -1,158 +1,185 @@
 <!DOCTYPE html>
-<html lang="th">
+<html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>PlanFlow — Smart Calendar Planner</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Clash+Display:wght@400;500;600;700&family=Cabinet+Grotesk:wght@300;400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css"/>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>PlanFlow — Calendar Planner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
+
 <canvas id="bgCanvas"></canvas>
 
-<div class="app">
+<div class="app" id="app">
 
-  <!-- SIDEBAR -->
+  <!-- ═══════════ SIDEBAR ═══════════ -->
   <aside class="sidebar" id="sidebar">
-    <div class="sidebar-brand">
-      <div class="brand-icon">P</div>
-      <span class="brand-name">PlanFlow</span>
-    </div>
+    <div class="sidebar-inner">
 
-    <!-- Mini Calendar Nav -->
-    <div class="mini-nav">
-      <button class="mini-arrow" id="prevMonth">‹</button>
-      <span class="mini-title" id="miniTitle"></span>
-      <button class="mini-arrow" id="nextMonth">›</button>
-    </div>
+      <div class="brand">
+        <div class="brand-mark">P</div>
+        <span class="brand-name">PlanFlow</span>
+        <button class="sidebar-close" id="sidebarClose" title="Close">×</button>
+      </div>
 
-    <!-- ADD EVENT FORM -->
-    <div class="add-section">
-      <h3 class="section-label">New Event</h3>
-      <div class="form-group">
-        <label>Title</label>
-        <input id="evTitle" type="text" placeholder="e.g. Study JavaScript..." />
-      </div>
-      <div class="form-group">
-        <label>Category</label>
-        <select id="evCategory">
-          <option value="study">📚 Study</option>
-          <option value="work">💼 Work</option>
-          <option value="meet">🤝 Meeting</option>
-          <option value="health">💪 Health</option>
-          <option value="personal">✨ Personal</option>
-          <option value="deadline">🔥 Deadline</option>
-        </select>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Start Date</label>
-          <input id="evStart" type="date"/>
-        </div>
-        <div class="form-group">
-          <label>End Date</label>
-          <input id="evEnd" type="date"/>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Start Time</label>
-          <input id="evStartTime" type="time" value="09:00"/>
-        </div>
-        <div class="form-group">
-          <label>End Time</label>
-          <input id="evEndTime" type="time" value="10:00"/>
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Note (optional)</label>
-        <textarea id="evNote" placeholder="Details, goals, links..."></textarea>
-      </div>
-      <button class="add-btn" id="addEventBtn">
-        <span>+ Add Event</span>
-      </button>
-    </div>
+      <!-- ADD FORM -->
+      <section class="form-section">
+        <h3 class="section-title">New Event</h3>
 
-    <!-- Upcoming Events -->
-    <div class="upcoming-section">
-      <h3 class="section-label">Upcoming</h3>
-      <div id="upcomingList" class="upcoming-list"></div>
+        <div class="field">
+          <label for="fTitle">Title</label>
+          <input id="fTitle" type="text" placeholder="e.g. Morning Workout…" autocomplete="off"/>
+        </div>
+
+        <!-- Category: preset pills + custom input -->
+        <div class="field">
+          <label>Category</label>
+          <div class="cat-pills" id="catPills">
+            <button class="cat-pill active" data-cat="study">📚 Study</button>
+            <button class="cat-pill" data-cat="work">💼 Work</button>
+            <button class="cat-pill" data-cat="meet">🤝 Meeting</button>
+            <button class="cat-pill" data-cat="health">💪 Health</button>
+            <button class="cat-pill" data-cat="personal">✨ Personal</button>
+            <button class="cat-pill" data-cat="deadline">🔥 Deadline</button>
+            <button class="cat-pill cat-custom-toggle" id="customCatToggle" data-cat="">＋ Custom</button>
+          </div>
+          <div class="custom-cat-wrap hidden" id="customCatWrap">
+            <input id="customCatInput" type="text" placeholder="e.g. 🎸 Music Practice"/>
+            <p class="field-hint">Type any emoji + label you want</p>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="fStart">Start Date</label>
+            <input id="fStart" type="date"/>
+          </div>
+          <div class="field">
+            <label for="fEnd">End Date</label>
+            <input id="fEnd" type="date"/>
+            <p class="field-hint">Same as start = single day</p>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="fSTime">Start Time</label>
+            <input id="fSTime" type="time" value="09:00"/>
+          </div>
+          <div class="field">
+            <label for="fETime">End Time</label>
+            <input id="fETime" type="time" value="10:00"/>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="fNote">Note</label>
+          <textarea id="fNote" placeholder="Goals, links, details…"></textarea>
+        </div>
+
+        <button class="btn-add" id="addBtn">
+          <span class="btn-add-icon">+</span>
+          <span>Add Event</span>
+        </button>
+      </section>
+
+      <!-- UPCOMING -->
+      <section class="upcoming-section">
+        <h3 class="section-title">Upcoming</h3>
+        <div id="upcomingList" class="upcoming-list"></div>
+      </section>
+
     </div>
   </aside>
 
-  <!-- MAIN -->
+  <!-- ═══════════ MAIN ═══════════ -->
   <main class="main">
 
-    <!-- TOP BAR -->
+    <!-- TOPBAR -->
     <div class="topbar">
       <div class="topbar-left">
-        <button class="topbar-btn" id="sidebarToggle" title="Toggle sidebar">☰</button>
-        <div class="view-tabs">
-          <button class="view-tab active" data-view="month">Month</button>
-          <button class="view-tab" data-view="week">Week</button>
-          <button class="view-tab" data-view="day">Day</button>
+        <button class="btn-icon" id="sidebarToggle" title="Toggle sidebar" aria-label="Toggle sidebar">
+          <svg width="16" height="16" fill="none" viewBox="0 0 16 16"><rect x="1" y="3.5" width="14" height="1.5" rx=".75" fill="currentColor"/><rect x="1" y="7.25" width="14" height="1.5" rx=".75" fill="currentColor"/><rect x="1" y="11" width="14" height="1.5" rx=".75" fill="currentColor"/></svg>
+        </button>
+        <div class="view-tabs" role="tablist">
+          <button class="view-tab active" data-view="month" role="tab">Month</button>
+          <button class="view-tab" data-view="week" role="tab">Week</button>
+          <button class="view-tab" data-view="day" role="tab">Day</button>
         </div>
       </div>
+
       <div class="topbar-center">
-        <button class="nav-btn" id="mainPrev">‹</button>
-        <h2 class="main-title" id="mainTitle"></h2>
-        <button class="nav-btn" id="mainNext">›</button>
-        <button class="today-btn" id="todayBtn">Today</button>
+        <button class="btn-nav" id="prevBtn" aria-label="Previous">&#8249;</button>
+        <h2 class="cal-title" id="calTitle"></h2>
+        <button class="btn-nav" id="nextBtn" aria-label="Next">&#8250;</button>
+        <button class="btn-today" id="todayBtn">Today</button>
       </div>
+
       <div class="topbar-right">
-        <div class="legend">
-          <span class="legend-dot study"></span>Study
-          <span class="legend-dot work"></span>Work
-          <span class="legend-dot meet"></span>Meet
-          <span class="legend-dot health"></span>Health
-          <span class="legend-dot personal"></span>Personal
-          <span class="legend-dot deadline"></span>Deadline
+        <div class="legend" id="legend">
+          <!-- Populated by JS -->
         </div>
       </div>
     </div>
 
-    <!-- MONTH VIEW -->
-    <div class="view-container" id="viewMonth">
-      <div class="cal-header" id="calHeader"></div>
-      <div class="cal-grid" id="calGrid"></div>
-    </div>
+    <!-- VIEWS -->
+    <div class="view-wrap">
 
-    <!-- WEEK VIEW -->
-    <div class="view-container hidden" id="viewWeek">
-      <div class="week-grid" id="weekGrid"></div>
-    </div>
+      <!-- Month -->
+      <div class="view" id="vMonth">
+        <div class="dow-bar" id="dowBar"></div>
+        <div class="month-grid" id="monthGrid"></div>
+      </div>
 
-    <!-- DAY VIEW -->
-    <div class="view-container hidden" id="viewDay">
-      <div class="day-view" id="dayView"></div>
-    </div>
+      <!-- Week -->
+      <div class="view hidden" id="vWeek">
+        <div class="time-grid">
+          <div class="time-gutter" id="wGutter"></div>
+          <div class="time-cols" id="weekCols"></div>
+        </div>
+      </div>
 
+      <!-- Day -->
+      <div class="view hidden" id="vDay">
+        <div class="day-banner" id="dayBanner"></div>
+        <div class="time-grid">
+          <div class="time-gutter" id="dGutter"></div>
+          <div class="day-col-wrap" id="dayCols"></div>
+        </div>
+      </div>
+
+    </div>
   </main>
 </div>
 
-<!-- EVENT DETAIL MODAL -->
-<div class="modal-overlay hidden" id="detailModal">
-  <div class="modal-card" id="detailCard">
-    <button class="modal-close" id="detailClose">×</button>
-    <div class="detail-cat-stripe" id="detailStripe"></div>
-    <div class="detail-body">
-      <div class="detail-icon" id="detailIcon"></div>
-      <h2 id="detailTitle"></h2>
-      <div class="detail-meta" id="detailMeta"></div>
-      <p class="detail-note" id="detailNote"></p>
-      <button class="delete-event-btn" id="deleteEventBtn">Delete Event</button>
+<!-- DETAIL MODAL -->
+<div class="overlay hidden" id="detailOv" role="dialog" aria-modal="true">
+  <div class="modal detail-modal" id="detailModal">
+    <div class="modal-accent" id="modalAccent"></div>
+    <button class="modal-close" id="detailClose" aria-label="Close">×</button>
+    <div class="modal-body">
+      <div class="modal-cat-icon" id="dIcon"></div>
+      <h2 class="modal-title" id="dTitle"></h2>
+      <ul class="modal-meta" id="dMeta"></ul>
+      <p class="modal-note" id="dNote"></p>
+      <div class="modal-footer">
+        <button class="btn-delete" id="delBtn">Delete Event</button>
+      </div>
     </div>
   </div>
 </div>
 
-<!-- DAY CLICK MODAL -->
-<div class="modal-overlay hidden" id="dayModal">
-  <div class="modal-card day-modal-card">
-    <button class="modal-close" id="dayModalClose">×</button>
-    <h3 id="dayModalTitle"></h3>
-    <div id="dayModalEvents"></div>
-    <button class="add-btn mini-add" id="dayModalAdd">+ Quick Add</button>
+<!-- DAY POPUP MODAL -->
+<div class="overlay hidden" id="dayPopOv" role="dialog" aria-modal="true">
+  <div class="modal day-popup">
+    <button class="modal-close" id="dayPopClose" aria-label="Close">×</button>
+    <div class="modal-body">
+      <h3 class="modal-title" id="dayPopTitle"></h3>
+      <div id="dayPopList" class="day-pop-list"></div>
+      <button class="btn-quick-add" id="quickAddBtn">+ Add event on this day</button>
+    </div>
   </div>
 </div>
 
