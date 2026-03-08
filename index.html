@@ -1,62 +1,161 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Advanced To-Do App — Portfolio</title>
-<link rel="stylesheet" href="style.css" />
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>PlanFlow — Smart Calendar Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Clash+Display:wght@400;500;600;700&family=Cabinet+Grotesk:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css"/>
 </head>
 <body>
-<main class="app" aria-labelledby="appTitle">
-<header>
-<h1 id="appTitle">⚡ Advanced Task Manager</h1>
-<div class="header-actions">
-<button id="themeToggle" aria-pressed="false" title="Toggle theme">🌙</button>
-<button id="addSample" title="Add sample tasks">➕ Sample</button>
+<canvas id="bgCanvas"></canvas>
+
+<div class="app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon">P</div>
+      <span class="brand-name">PlanFlow</span>
+    </div>
+
+    <!-- Mini Calendar Nav -->
+    <div class="mini-nav">
+      <button class="mini-arrow" id="prevMonth">‹</button>
+      <span class="mini-title" id="miniTitle"></span>
+      <button class="mini-arrow" id="nextMonth">›</button>
+    </div>
+
+    <!-- ADD EVENT FORM -->
+    <div class="add-section">
+      <h3 class="section-label">New Event</h3>
+      <div class="form-group">
+        <label>Title</label>
+        <input id="evTitle" type="text" placeholder="e.g. Study JavaScript..." />
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select id="evCategory">
+          <option value="study">📚 Study</option>
+          <option value="work">💼 Work</option>
+          <option value="meet">🤝 Meeting</option>
+          <option value="health">💪 Health</option>
+          <option value="personal">✨ Personal</option>
+          <option value="deadline">🔥 Deadline</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Start Date</label>
+          <input id="evStart" type="date"/>
+        </div>
+        <div class="form-group">
+          <label>End Date</label>
+          <input id="evEnd" type="date"/>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Start Time</label>
+          <input id="evStartTime" type="time" value="09:00"/>
+        </div>
+        <div class="form-group">
+          <label>End Time</label>
+          <input id="evEndTime" type="time" value="10:00"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Note (optional)</label>
+        <textarea id="evNote" placeholder="Details, goals, links..."></textarea>
+      </div>
+      <button class="add-btn" id="addEventBtn">
+        <span>+ Add Event</span>
+      </button>
+    </div>
+
+    <!-- Upcoming Events -->
+    <div class="upcoming-section">
+      <h3 class="section-label">Upcoming</h3>
+      <div id="upcomingList" class="upcoming-list"></div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- TOP BAR -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="topbar-btn" id="sidebarToggle" title="Toggle sidebar">☰</button>
+        <div class="view-tabs">
+          <button class="view-tab active" data-view="month">Month</button>
+          <button class="view-tab" data-view="week">Week</button>
+          <button class="view-tab" data-view="day">Day</button>
+        </div>
+      </div>
+      <div class="topbar-center">
+        <button class="nav-btn" id="mainPrev">‹</button>
+        <h2 class="main-title" id="mainTitle"></h2>
+        <button class="nav-btn" id="mainNext">›</button>
+        <button class="today-btn" id="todayBtn">Today</button>
+      </div>
+      <div class="topbar-right">
+        <div class="legend">
+          <span class="legend-dot study"></span>Study
+          <span class="legend-dot work"></span>Work
+          <span class="legend-dot meet"></span>Meet
+          <span class="legend-dot health"></span>Health
+          <span class="legend-dot personal"></span>Personal
+          <span class="legend-dot deadline"></span>Deadline
+        </div>
+      </div>
+    </div>
+
+    <!-- MONTH VIEW -->
+    <div class="view-container" id="viewMonth">
+      <div class="cal-header" id="calHeader"></div>
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+
+    <!-- WEEK VIEW -->
+    <div class="view-container hidden" id="viewWeek">
+      <div class="week-grid" id="weekGrid"></div>
+    </div>
+
+    <!-- DAY VIEW -->
+    <div class="view-container hidden" id="viewDay">
+      <div class="day-view" id="dayView"></div>
+    </div>
+
+  </main>
 </div>
-</header><section class="input-area" aria-label="Add task">
-<input id="taskInput" placeholder="Add a new task..." aria-label="Task description" />
-<input id="dueInput" type="date" aria-label="Due date" />
-<select id="prioritySelect" aria-label="Priority">
-<option value="normal">Normal</option>
-<option value="high">High 🔥</option>
-<option value="low">Low</option>
-</select>
-<button id="addBtn">Add</button>
-</section><div class="progress" aria-hidden="false" title="Completion progress">
-<div id="progressBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
-</div><nav class="filters" role="tablist" aria-label="Filters">
-<button data-filter="all" role="tab" aria-selected="true">All</button>
-<button data-filter="active" role="tab">Active</button>
-<button data-filter="completed" role="tab">Completed</button>
-</nav><ul id="taskList" class="task-list" aria-live="polite"></ul><div class="bottom">
-<div class="left">
-<span id="taskCount"></span>
+
+<!-- EVENT DETAIL MODAL -->
+<div class="modal-overlay hidden" id="detailModal">
+  <div class="modal-card" id="detailCard">
+    <button class="modal-close" id="detailClose">×</button>
+    <div class="detail-cat-stripe" id="detailStripe"></div>
+    <div class="detail-body">
+      <div class="detail-icon" id="detailIcon"></div>
+      <h2 id="detailTitle"></h2>
+      <div class="detail-meta" id="detailMeta"></div>
+      <p class="detail-note" id="detailNote"></p>
+      <button class="delete-event-btn" id="deleteEventBtn">Delete Event</button>
+    </div>
+  </div>
 </div>
-<div class="right">
-<button id="clearCompleted">Clear Completed</button>
-<button id="exportBtn" title="Export tasks">⬇️ Export</button>
-<button id="importBtn" title="Import tasks">⬆️ Import</button>
-<input type="file" id="importFile" accept="application/json" style="display:none" />
+
+<!-- DAY CLICK MODAL -->
+<div class="modal-overlay hidden" id="dayModal">
+  <div class="modal-card day-modal-card">
+    <button class="modal-close" id="dayModalClose">×</button>
+    <h3 id="dayModalTitle"></h3>
+    <div id="dayModalEvents"></div>
+    <button class="add-btn mini-add" id="dayModalAdd">+ Quick Add</button>
+  </div>
 </div>
-</div><template id="taskTemplate">
-<li class="task" draggable="true">
-<div class="task-main">
-<button class="check" aria-label="Toggle complete">✓</button>
-<div class="meta">
-<span class="text"></span>
-<div class="sub">
-<span class="due"></span>
-<span class="priority"></span>
-</div>
-</div>
-</div>
-<div class="task-actions">
-<button class="edit" title="Edit task">✎</button>
-<button class="delete" title="Delete task">✕</button>
-</div>
-</li>
-</template><script src="script.js"></script>
-</main>
+
+<script src="script.js"></script>
 </body>
 </html>
